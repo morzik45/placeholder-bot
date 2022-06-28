@@ -1,4 +1,4 @@
-module gitlab.deepbot.org/morzik/plug-bot
+module github.com/morzik45/placeholder-bot
 
 go 1.17
 
