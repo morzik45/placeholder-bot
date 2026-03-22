@@ -1,5 +1,5 @@
 module github.com/morzik45/placeholder-bot
 
-go 1.17
+go 1.24
 
-require github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1 // indirect
+require github.com/go-telegram/bot v1.20.0

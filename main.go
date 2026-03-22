@@ -1,54 +1,55 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-)
-
-var (
-	BotToken = os.Getenv("BOT_TOKEN")
+	tgbot "github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
 )
 
 func main() {
-	bot, err := tgbotapi.NewBotAPI(BotToken)
+	cfg, err := LoadConfigFromEnv()
 	if err != nil {
-		log.Panic(err)
+		log.Fatalf("load config: %v", err)
 	}
-	bot.Debug = false
-	log.Printf("Authorized on account %s", bot.Self.UserName)
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
 
-	var count int
-	startTime := time.Now()
-
-	for update := range bot.GetUpdatesChan(u) {
-		if update.Message != nil {
-			if update.Message.Text == "/c" {
-				msg := tgbotapi.NewMessage(
-					update.Message.Chat.ID,
-					fmt.Sprintf("Uptime: %s\nRequests: %d", time.Since(startTime), count),
-				)
-				_, err = bot.Send(msg)
-				if err != nil {
-					log.Println(err)
-				}
-				continue
-			}
-			count += 1
-			text := "Бот остановлен на неопределенный срок, по причине нехватки ресурсов для работы всех наших проектов.\n\n" +
-				"Все ресурсы задействованы в нашем боте для улучшения фотографий, попробуйте бесплатно:\n@deeppaintbot \n" +
-				"За новостями следите тут: @deepfaker\nСписок других наших ботов и ресурсов: t.me/deepfaker/2128"
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
-			msg.DisableWebPagePreview = true
-			_, err = bot.Send(msg)
-			if err != nil {
-				log.Println(err)
-			}
-		}
+	content := NewContentStore(cfg)
+	if err := content.ValidateForMode(cfg.Mode); err != nil {
+		log.Fatalf("validate content: %v", err)
 	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	opts := []tgbot.Option{
+		tgbot.WithErrorsHandler(func(err error) {
+			log.Printf("telegram error: %v", err)
+		}),
+	}
+	if cfg.Debug {
+		opts = append(opts, tgbot.WithDebug())
+	}
+
+	client, err := tgbot.New(cfg.BotToken, opts...)
+	if err != nil {
+		log.Fatalf("create bot: %v", err)
+	}
+
+	app := NewMaintenanceApp(cfg, client, content, time.Now)
+	client.RegisterHandlerMatchFunc(func(update *models.Update) bool {
+		return true
+	}, app.HandleUpdate)
+
+	if _, err := client.DeleteWebhook(ctx, &tgbot.DeleteWebhookParams{DropPendingUpdates: true}); err != nil {
+		log.Printf("delete webhook: %v", err)
+	}
+
+	log.Printf("starting maintenance bot in %s mode with static dir %s", cfg.Mode, cfg.StaticDir)
+	client.Start(ctx)
+	log.Printf("maintenance bot stopped")
 }

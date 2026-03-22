@@ -1,18 +1,27 @@
-FROM golang:1.17-alpine as builder
-LABEL stage=builder
-WORKDIR /usr/src/app
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
- apk add --no-cache upx ca-certificates tzdata
-COPY go.mod ./
-COPY go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -ldflags "-s -w" -o bot . &&\
- upx --best bot -o _upx_server && \
- mv -f _upx_server bot
+FROM golang:1.24-alpine AS builder
 
-FROM scratch as runner
-COPY --from=builder /usr/share/zoneinfo/UTC /etc/localtime
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/src/app/bot /opt/app/
-CMD ["/opt/app/bot"]
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /src
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags="-s -w" -o /out/placeholder-bot .
+
+FROM alpine:3.21 AS runner
+
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -S app && \
+    adduser -S -G app -h /opt/app app && \
+    mkdir -p /opt/app/static && \
+    chown -R app:app /opt/app
+
+WORKDIR /opt/app
+COPY --from=builder /out/placeholder-bot /opt/app/placeholder-bot
+
+USER app
+CMD ["/opt/app/placeholder-bot"]
